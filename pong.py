@@ -1,6 +1,6 @@
 from tkinter import *
 # TODO: Scoring
-# TODO: Document Code
+# TODO: Document Code-
 
 
 class Point:
@@ -50,7 +50,7 @@ class BoundingBox:
     def intersects(self, other):
         assert isinstance(other, BoundingBox)
 
-        x_overlaps =  self.top_right().x > other.top_left().x and other.top_right().x > self.top_left().x
+        x_overlaps = self.top_right().x > other.top_left().x and other.top_right().x > self.top_left().x
         y_overlaps = self.bottom_left().y > other.top_left().y and other.bottom_left().y > self.top_left().y
 
         return x_overlaps and y_overlaps
@@ -64,8 +64,12 @@ class GameObject:
         self.velocity = velocity
 
     def update(self):
-        self.bounding_box.origin += self.velocity
-        self.canvas.move(self.canvas_object, self.velocity.x, self.velocity.y)
+        self.move(self.velocity)
+
+    def move(self, delta_pos):
+        """Move the object by moving its origin to 'origin + delta_pos'"""
+        self.bounding_box.origin += delta_pos
+        self.canvas.move(self.canvas_object, delta_pos.x, delta_pos.y)
 
     def get_position(self):
         return self.canvas.coords(self.canvas_object)
@@ -86,18 +90,27 @@ class Paddle(GameObject):
     PLAYER_ONE = 1
     PLAYER_TWO = 2
 
-    def __init__(self, canvas, x1, y1, x2, y2, speed=10):
+    PADDLE_WIDTH = 10
+    PADDLE_HEIGHT = 40
+
+    def __init__(self, canvas, x1, y1, x2, y2, speed=8):
         super().__init__(canvas, x1, y1, x2, y2)
         self.canvas_object = canvas.create_rectangle(x1, y1, x2, y2, fill="black")  
         self.speed = speed
 
     @staticmethod
-    def get_player(canvas, player, speed=10):
+    def get_player(canvas, player, speed=8):
         """Factory method for creating a player paddle."""
+        x_offset = 25
+
         if player == Paddle.PLAYER_ONE:
-            return Paddle(canvas, 25, 180, 35, 220, speed)
+            x = x_offset
+            y = (canvas.winfo_height() + Paddle.PADDLE_HEIGHT) / 2
+            return Paddle(canvas, x, y, x + Paddle.PADDLE_WIDTH, y + Paddle.PADDLE_HEIGHT, speed)
         else:
-            return Paddle(canvas, 765, 180, 775, 220, speed)
+            x = canvas.winfo_width() - x_offset - Paddle.PADDLE_WIDTH
+            y = (canvas.winfo_height() + Paddle.PADDLE_HEIGHT) / 2
+            return Paddle(canvas, x, y, x + Paddle.PADDLE_WIDTH, y + Paddle.PADDLE_HEIGHT, speed)
 
     def move_up(self):
         self.velocity = Point(0, -self.speed)
@@ -118,8 +131,7 @@ class Paddle(GameObject):
         elif y2 > self.canvas.winfo_height():
             dy = self.canvas.winfo_height() - y2
 
-        self.canvas.move(self.canvas_object, 0, dy)
-        self.bounding_box.origin += Point(0, dy)
+        self.move(Point(0, dy))
 
 
 class Ball(GameObject):
@@ -142,29 +154,58 @@ class Ball(GameObject):
 
 
 class PongGame:
-    def __init__(self, window, canvas, friction=0.8, ball_max_speed=10):
+    """A game of Pong.
+
+    You can add 'spin' to the ball by hitting the ball with your paddle while moving.
+    Each hit speeds up the ball.
+
+    Call run() to start the game.
+    """
+
+    def __init__(self, spin=0.2, hit_speedup=1.05, ball_max_speed=10, window_width=800, window_height=400):
+        """Set up a game of Pong.
+
+        Arguments:
+            spin: ratio of a paddle's y velocity that will be added to the ball's velocity as 'spin' when the ball
+                  is hit.
+            hit_speedup: multiplier for the ball's x velocity when it bounces off a paddle.
+            ball_max_speed: the max speed in either of the x or y axes.
+            window_width: the width of the game window. min of 600.
+            window_height: the height of the game window. min of 300.
+        """
+        window = Tk()
+        window.title("Pong")
+        window.resizable(False, False)
+        window.bind('<KeyPress>', lambda event: self.handle_key_pressed(event))
+        window.bind('<KeyRelease>', lambda event: self.handle_key_released(event))
+
+        window_width = max(600, window_width)
+        window_height = max(300, window_height)
+
+        canvas = Canvas(window, width=window_width, height=window_height)
+        canvas.pack()
+
         self.window = window
         self.canvas = canvas
-        self.ball = Ball(self.canvas, 400, 200, 412, 212, speed=3)
+
+        canvas.update()
+
+        self.ball = Ball(self.canvas, window_width / 2, window_height / 2, window_width / 2, 212, speed=3)
         self.pad1 = Paddle.get_player(self.canvas, Paddle.PLAYER_ONE)
         self.pad2 = Paddle.get_player(self.canvas, Paddle.PLAYER_TWO)
-        self.friction = friction  # How much of a paddle's velocity will be added to the ball's velocity as 'spin'.
+        self.spin = spin
         self.ball_max_speed = ball_max_speed
-
+        self.hit_speedup = hit_speedup
+        w = self.canvas.winfo_width()
         self.p1_score = 0
         self.p1_score_display = self.canvas.create_text(10, 10, text=str(self.p1_score))
         self.p2_score = 0
         w = self.canvas.winfo_width()
-        ## TODO: calculate text pos instead of hardcoding it
-        self.p2_score_display = self.canvas.create_text(790, 10, text=str(self.p2_score))
+        self.p2_score_display = self.canvas.create_text(window_width - 10, 10, text=str(self.p2_score))
 
-        window.bind('<KeyPress>', lambda event: self.handle_key_pressed(event))
-        window.bind('<KeyRelease>', lambda event: self.handle_key_released(event))
-
-        self.paused = False
-            ## TODO: calculate pos instead of hardcoding it"Press Space to Start"
-        self.pause_text = self.canvas.create_text(400, 180, text="Press Space to Start")
-        self.toggle_pause()
+        self.paused = True
+        self.pause_text = self.canvas.create_text(window_width / 2, window_height / 2 - 20, text="Press Space to Start")
+        self.serve()
 
     def handle_key_pressed(self, event):
         key = event.keysym.lower()
@@ -193,11 +234,26 @@ class PongGame:
 
     def physics(self):
         if self.ball.intersects(self.pad1):
-            self.ball.velocity.x *= -1
-            self.ball.velocity.y += (1 - self.friction) * self.pad1.velocity.y
+            self.ball.velocity.x *= -1 * self.hit_speedup
+            self.ball.velocity.y += self.spin * self.pad1.velocity.y
+
+            # put ball on the rhs of the paddle
+            pad1_x = self.pad1.bounding_box.top_right().x
+            ball_x = self.ball.bounding_box.top_left().x
+            dx = pad1_x - ball_x
+
+            self.ball.move(Point(dx, 0))
+
         elif self.ball.intersects(self.pad2):
-            self.ball.velocity.x *= -1
-            self.ball.velocity.y += (1 - self.friction) * self.pad2.velocity.y
+            self.ball.velocity.x *= -1 * self.hit_speedup
+            self.ball.velocity.y += self.spin * self.pad2.velocity.y
+
+            # put ball on the lhs of the paddle
+            pad2_x = self.pad2.bounding_box.top_left().x
+            ball_x = self.ball.bounding_box.top_right().x
+            dx = pad2_x - ball_x
+
+            self.ball.move(Point(dx, 0))
 
         if self.ball.velocity.x > self.ball_max_speed:
             self.ball.velocity.x = self.ball_max_speed
@@ -227,7 +283,6 @@ class PongGame:
         self.canvas.delete(self.pad2.canvas_object)
         self.pad2 = Paddle.get_player(self.canvas, Paddle.PLAYER_TWO)
 
-
         self.toggle_pause()
 
     def toggle_pause(self):
@@ -239,10 +294,14 @@ class PongGame:
             self.canvas.itemconfig(self.pause_text, text="")
 
     def run(self):
+        self.mainloop()
+        self.window.mainloop()
+
+    def mainloop(self):
         if not self.paused:
             self.update()
 
-        self.canvas.after(16, self.run)
+        self.canvas.after(16, self.mainloop)
 
     def update(self):
         self.ball.update()
@@ -252,21 +311,9 @@ class PongGame:
 
         self.canvas.itemconfig(self.p1_score_display, text=str(self.p1_score))
         self.canvas.itemconfig(self.p2_score_display, text=str(self.p2_score))
-        
 
-def main():
-    # Setup.
-    window = Tk()
-    window.title("Pong")
-    window.resizable(False,False)
-    canvas = Canvas(window, width=800, height=400)
-    canvas.pack()
-
-    # Main game.
-    game = PongGame(window, canvas)
-    game.run()
-    window.mainloop()
 
 if __name__ == "__main__":
-    main()
+    game = PongGame()
+    game.run()
 
