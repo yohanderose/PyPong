@@ -1,4 +1,5 @@
 from tkinter import *
+import random
 # TODO: Scoring
 # TODO: Document Code-
 
@@ -22,6 +23,15 @@ class Point:
             return Point(self.x - other.x, self.y - other.y)
         else: # other is a scalar
             return Point(self.x - other, self.y - other)
+
+    def __mul__(self, other):
+        if isinstance(other, Point):
+            return Point(self.x * other.x, self.y * other.y)
+        else: # other is a scalar
+            return Point(self.x * other, self.y * other)
+
+    def __rmul__(self, other):
+        return self.__mul__(other)
 
     def __eq__(self, other):
         assert isinstance(other, Point)
@@ -99,17 +109,17 @@ class Paddle(GameObject):
         self.speed = speed
 
     @staticmethod
-    def get_player(canvas, player, speed=8):
+    def get_paddle(canvas, player, speed=8):
         """Factory method for creating a player paddle."""
         x_offset = 25
 
         if player == Paddle.PLAYER_ONE:
             x = x_offset
-            y = (canvas.winfo_height() + Paddle.PADDLE_HEIGHT) / 2
+            y = (canvas.winfo_height() - Paddle.PADDLE_HEIGHT) / 2
             return Paddle(canvas, x, y, x + Paddle.PADDLE_WIDTH, y + Paddle.PADDLE_HEIGHT, speed)
         else:
             x = canvas.winfo_width() - x_offset - Paddle.PADDLE_WIDTH
-            y = (canvas.winfo_height() + Paddle.PADDLE_HEIGHT) / 2
+            y = (canvas.winfo_height() - Paddle.PADDLE_HEIGHT) / 2
             return Paddle(canvas, x, y, x + Paddle.PADDLE_WIDTH, y + Paddle.PADDLE_HEIGHT, speed)
 
     def move_up(self):
@@ -121,7 +131,7 @@ class Paddle(GameObject):
     def update(self):
         super().update()
 
-        x1, y1, x2, y2 = self.get_position()
+        _, y1, _, y2 = self.get_position()
 
         # keep paddle on screen
         dy = 0
@@ -135,22 +145,38 @@ class Paddle(GameObject):
 
 
 class Ball(GameObject):
+    BALL_SIZE = 12
+
     def __init__(self, canvas, x1, y1, x2, y2, speed):
-        super().__init__(canvas, x1, y1, x2, y2, velocity=Point(speed, speed))
+        """Create a ball at the specified location.
+
+        The ball starts moving in a random direction.
+        """
+        x_dir = -1 if random.gauss(0, 1) < 0 else 1
+        y_dir = -1 if random.gauss(0, 1) < 0 else 1
+
+        initial_velocity = speed * Point(x_dir, y_dir)
+
+        super().__init__(canvas, x1, y1, x2, y2, velocity=initial_velocity)
         
         self.canvas_object = canvas.create_oval(x1, y1, x2, y2, fill="red")
+
+    @staticmethod
+    def get_centred_ball(canvas, speed=3):
+        """Get a ball placed at the centre of the game window."""
+        x = canvas.winfo_width() / 2 - Ball.BALL_SIZE / 2
+        y = canvas.winfo_height() / 2 - Ball.BALL_SIZE / 2
+        
+        return Ball(canvas, x, y, x + Ball.BALL_SIZE, y + Ball.BALL_SIZE, speed=speed)
 
     def update(self):
         super().update()
 
-        x1, y1, x2, y2 = self.get_position()
+        _, y1, _, y2 = self.get_position()
 
         # Check if ball past upper or lower screen bounds.
         if y1 <= 0 or y2 >= self.canvas.winfo_height():
             self.velocity.y *= -1
-
-        # if x1 <= 0 or x2 >= self.canvas.winfo_width():
-        #     self.velocity.x *= -1
 
 
 class PongGame:
@@ -161,7 +187,6 @@ class PongGame:
 
     Call run() to start the game.
     """
-
     def __init__(self, spin=0.2, hit_speedup=1.05, ball_max_speed=10, window_width=800, window_height=400):
         """Set up a game of Pong.
 
@@ -184,28 +209,45 @@ class PongGame:
 
         canvas = Canvas(window, width=window_width, height=window_height)
         canvas.pack()
+        canvas.update()
 
         self.window = window
         self.canvas = canvas
 
-        canvas.update()
+        # paddles and ball setup later in reset()
+        self.pad1 = None
+        self.pad2 = None
+        self.ball = None
 
-        self.ball = Ball(self.canvas, window_width / 2, window_height / 2, window_width / 2, 212, speed=3)
-        self.pad1 = Paddle.get_player(self.canvas, Paddle.PLAYER_ONE)
-        self.pad2 = Paddle.get_player(self.canvas, Paddle.PLAYER_TWO)
         self.spin = spin
         self.ball_max_speed = ball_max_speed
         self.hit_speedup = hit_speedup
-        w = self.canvas.winfo_width()
+        
         self.p1_score = 0
         self.p1_score_display = self.canvas.create_text(10, 10, text=str(self.p1_score))
-        self.p2_score = 0
-        w = self.canvas.winfo_width()
+        self.p2_score = 0        
         self.p2_score_display = self.canvas.create_text(window_width - 10, 10, text=str(self.p2_score))
 
-        self.paused = True
+        self.paused = False
         self.pause_text = self.canvas.create_text(window_width / 2, window_height / 2 - 20, text="Press Space to Start")
-        self.serve()
+        self.reset()
+
+    def reset(self):
+        """Reset the game by placing the ball back in the center and the paddles in their starting positions."""
+        if self.ball is not None:
+            self.canvas.delete(self.ball.canvas_object)
+
+        self.ball = Ball.get_centred_ball(self.canvas)
+
+        if self.pad1 is not None:
+            self.canvas.delete(self.pad1.canvas_object)
+        if self.pad2 is not None:            
+            self.canvas.delete(self.pad2.canvas_object)
+
+        self.pad1 = Paddle.get_paddle(self.canvas, Paddle.PLAYER_ONE)
+        self.pad2 = Paddle.get_paddle(self.canvas, Paddle.PLAYER_TWO)
+
+        self.pause()
 
     def handle_key_pressed(self, event):
         key = event.keysym.lower()
@@ -222,6 +264,8 @@ class PongGame:
 
         if key == 'space':
             self.toggle_pause()
+        if key == 'r':
+            self.reset()
         
     def handle_key_released(self, event):
         key = event.keysym.lower()
@@ -265,33 +309,24 @@ class PongGame:
 
             if x1 < 0:
                 self.p2_score += 1
-                self.serve()
+                self.reset()
             elif x2 > self.canvas.winfo_width():
                 self.p1_score += 1
-                self.serve()
-
-    def serve(self):
-        self.canvas.delete(self.ball.canvas_object)
-
-        ball_width = 12
-        x = self.canvas.winfo_width() / 2 - ball_width / 2
-        y = self.canvas.winfo_height() / 2 - ball_width / 2
-        self.ball = Ball(self.canvas, x, y, x + ball_width, y + ball_width, speed=3)
-
-        self.canvas.delete(self.pad1.canvas_object)
-        self.pad1 = Paddle.get_player(self.canvas, Paddle.PLAYER_ONE)
-        self.canvas.delete(self.pad2.canvas_object)
-        self.pad2 = Paddle.get_player(self.canvas, Paddle.PLAYER_TWO)
-
-        self.toggle_pause()
+                self.reset()
 
     def toggle_pause(self):
-        self.paused = not self.paused
-
         if self.paused:
-            self.canvas.itemconfig(self.pause_text, text="Press Space to Start")
+            self.unpause()
         else:
-            self.canvas.itemconfig(self.pause_text, text="")
+            self.pause()
+
+    def pause(self):
+        self.paused = True
+        self.canvas.itemconfig(self.pause_text, text="Press Space to Start")
+
+    def unpause(self):
+        self.paused = False
+        self.canvas.itemconfig(self.pause_text, text="")
 
     def run(self):
         self.mainloop()
